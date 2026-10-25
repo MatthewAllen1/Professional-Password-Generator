@@ -1,5 +1,9 @@
 # Local Secure Password Generator
 
+[![Python tests](https://github.com/MatthewAllen1/Professional-Password-Generator/actions/workflows/python-tests.yml/badge.svg)](https://github.com/MatthewAllen1/Professional-Password-Generator/actions/workflows/python-tests.yml)
+
+A [CI-verified](https://github.com/MatthewAllen1/Professional-Password-Generator/actions) personal Python security engineering exercise. See [security policy](./SECURITY.md) and [license](./LICENSE).
+
 A small, standalone Python desktop application that generates random passwords locally using the standard-library `secrets` module. Intended as a learning/demo project rather than a replacement for a vetted password manager.
 
 ## Security properties
