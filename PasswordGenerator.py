@@ -1,126 +1,114 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-import pyperclip
-import random
+"""Local password generator using cryptographically secure randomness.
+
+No network calls, disk writes, or password telemetry.
+Clipboard contents can be accessed by other local applications.
+"""
+import math
+import secrets
 import string
+import tkinter as tk
+from tkinter import messagebox, ttk
 
-def generate_password(length, use_uppercase, use_lowercase, use_digits, use_special_chars):
-    characters = ''
-    if use_uppercase:
-        characters += string.ascii_uppercase
-    if use_lowercase:
-        characters += string.ascii_lowercase
-    if use_digits:
-        characters += string.digits
-    if use_special_chars:
-        characters += string.punctuation
+MIN_LENGTH = 12
+MAX_LENGTH = 128
 
-    if not characters:
-        raise ValueError("Select at least one character type.")
+CHARACTER_GROUPS = (
+    ("Uppercase", string.ascii_uppercase),
+    ("Lowercase", string.ascii_lowercase),
+    ("Digits", string.digits),
+    ("Symbols", string.punctuation),
+)
 
-    password = ''.join(random.choice(characters) for _ in range(length))
-    return password
 
-def password_strength(password):
-    strength = 0
-    if any(char.islower() for char in password):
-        strength += 1
-    if any(char.isupper() for char in password):
-        strength += 1
-    if any(char.isdigit() for char in password):
-        strength += 1
-    if any(char in string.punctuation for char in password):
-        strength += 1
-    return strength
+def generate_password(length: int, use_uppercase: bool, use_lowercase: bool,
+                      use_digits: bool, use_special_chars: bool) -> str:
+    """Generate a password containing at least one of each enabled category."""
+    if isinstance(length, bool) or not isinstance(length, int):
+        raise ValueError("Length must be an integer.")
+    if not MIN_LENGTH <= length <= MAX_LENGTH:
+        raise ValueError(f"Length must be between {MIN_LENGTH} and {MAX_LENGTH}.")
 
-def generate_password_and_display():
-    try:
-        length = int(length_entry.get())
-    except ValueError:
-        messagebox.showerror("Invalid Input", "Password length must be an integer.")
-        return
+    enabled = (use_uppercase, use_lowercase, use_digits, use_special_chars)
+    groups = [chars for selected, (_, chars) in zip(enabled, CHARACTER_GROUPS) if selected]
+    if not groups:
+        raise ValueError("Select at least one character category.")
 
-    use_uppercase = uppercase_var.get()
-    use_lowercase = lowercase_var.get()
-    use_digits = digits_var.get()
-    use_special_chars = special_chars_var.get()
+    alphabet = "".join(groups)
+    characters = [secrets.choice(group) for group in groups]
+    characters.extend(secrets.choice(alphabet) for _ in range(length - len(characters)))
 
-    try:
-        generated_password = generate_password(length, use_uppercase, use_lowercase, use_digits, use_special_chars)
-        password_label.config(text=f"Generated Password: {generated_password}")
-        strength = password_strength(generated_password)
-        strength_label.config(text=f"Password Strength: {strength}/4")
-        strength_progress.set(strength * 25)
-    except ValueError as e:
-        messagebox.showerror("Error", str(e))
+    # Fisher-Yates shuffle with rejection-sampled secure random indices.
+    for i in range(len(characters) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        characters[i], characters[j] = characters[j], characters[i]
+    return "".join(characters)
 
-def copy_to_clipboard():
-    generated_password = password_label.cget("text")[18:]  # Extract the generated password from the label
-    pyperclip.copy(generated_password)
-    messagebox.showinfo("Copy Successful", "Password copied to clipboard")
 
-app = tk.Tk()
-app.title("Professional Password Generator")
-app.geometry("400x500")
+def entropy_lower_bound(length: int, enabled: tuple[bool, bool, bool, bool]) -> float:
+    """Conservative informational estimate; not a password strength guarantee."""
+    groups = [chars for selected, (_, chars) in zip(enabled, CHARACTER_GROUPS) if selected]
+    if not groups:
+        return 0.0
+    # Guaranteed category selections make this a rough estimate, not exact entropy.
+    return max(0.0, (length - len(groups)) * math.log2(len("".join(groups))))
 
-# Center the application on the screen
-app.eval('tk::PlaceWindow . center')
 
-style = ttk.Style()
-style.configure("TButton", font=('Helvetica', 12))
-style.configure("TCheckbutton", font=('Helvetica', 12))
-style.configure("TLabel", font=('Helvetica', 12))
-style.configure("Password.TLabel", font=('Helvetica', 14, 'bold'))
+def main() -> None:
+    app = tk.Tk()
+    app.title("Local Secure Password Generator")
+    app.geometry("600x390")
+    app.resizable(True, False)
 
-# Title label
-title_label = ttk.Label(app, text="Password Generator", style="TLabel")
-title_label.pack(pady=10)
+    frame = ttk.Frame(app, padding=18)
+    frame.pack(fill="both", expand=True)
+    ttk.Label(frame, text="Local Password Generator", font=("Arial", 17, "bold")).pack(anchor="w")
+    ttk.Label(frame, text="Generated locally using Python's secrets module.").pack(anchor="w", pady=(3, 12))
 
-# Frame for input elements
-input_frame = ttk.Frame(app)
-input_frame.pack(pady=10)
+    controls = ttk.Frame(frame)
+    controls.pack(fill="x")
+    ttk.Label(controls, text="Length (12–128):").pack(side="left")
+    length_var = tk.StringVar(value="20")
+    ttk.Entry(controls, textvariable=length_var, width=7).pack(side="left", padx=8)
 
-# Label and entry for password length
-length_label = ttk.Label(input_frame, text="Password Length:")
-length_label.grid(row=0, column=0, padx=5, pady=5)
-length_entry = ttk.Entry(input_frame)
-length_entry.grid(row=0, column=1, padx=5, pady=5)
+    vars_ = [tk.BooleanVar(value=True) for _ in CHARACTER_GROUPS]
+    for (label, _), selected in zip(CHARACTER_GROUPS, vars_):
+        ttk.Checkbutton(frame, text=label, variable=selected).pack(anchor="w")
 
-# Checkboxes for character types with labels
-uppercase_var = tk.BooleanVar()
-lowercase_var = tk.BooleanVar()
-digits_var = tk.BooleanVar()
-special_chars_var = tk.BooleanVar()
+    generated_var = tk.StringVar()
+    status_var = tk.StringVar(value="Password has not been generated.")
+    ttk.Entry(frame, textvariable=generated_var, state="readonly", width=70).pack(fill="x", pady=(12, 4))
+    ttk.Label(frame, textvariable=status_var, wraplength=560).pack(anchor="w")
 
-uppercase_check = ttk.Checkbutton(input_frame, text="Uppercase", variable=uppercase_var, style="TCheckbutton")
-lowercase_check = ttk.Checkbutton(input_frame, text="Lowercase", variable=lowercase_var, style="TCheckbutton")
-digits_check = ttk.Checkbutton(input_frame, text="Include Digits", variable=digits_var, style="TCheckbutton")
-special_chars_check = ttk.Checkbutton(input_frame, text="Special Characters", variable=special_chars_var, style="TCheckbutton")
+    def generate() -> None:
+        try:
+            length = int(length_var.get())
+            selections = tuple(v.get() for v in vars_)
+            password = generate_password(length, *selections)
+        except ValueError as exc:
+            messagebox.showerror("Invalid options", str(exc))
+            return
+        generated_var.set(password)
+        status_var.set(
+            f"Generated {len(password)} characters. "
+            "Keep passwords private; clipboard copies may remain accessible to other apps."
+        )
 
-uppercase_check.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-lowercase_check.grid(row=2, column=0, padx=5, pady=5, sticky="w")
-digits_check.grid(row=3, column=0, padx=5, pady=5, sticky="w")
-special_chars_check.grid(row=4, column=0, padx=5, pady=5, sticky="w")
+    def copy_password() -> None:
+        if not generated_var.get():
+            messagebox.showwarning("Nothing to copy", "Generate a password first.")
+            return
+        app.clipboard_clear()
+        app.clipboard_append(generated_var.get())
+        app.update()
+        status_var.set("Copied to clipboard. Clear clipboard after using your password.")
 
-# Generate Password button
-generate_button = ttk.Button(app, text="Generate Password", command=generate_password_and_display, style="TButton")
-generate_button.pack(pady=10)
+    buttons = ttk.Frame(frame)
+    buttons.pack(anchor="w", pady=12)
+    ttk.Button(buttons, text="Generate", command=generate).pack(side="left")
+    ttk.Button(buttons, text="Copy", command=copy_password).pack(side="left", padx=8)
+    ttk.Label(frame, text="Never reuse passwords. Use a reputable password manager for storage.").pack(anchor="w")
+    app.mainloop()
 
-# Password display label
-password_label = ttk.Label(app, text="", style="Password.TLabel")
-password_label.pack()
 
-# Password strength label
-strength_label = ttk.Label(app, text="", style="TLabel")
-strength_label.pack()
-
-# Progress bar to show password strength
-strength_progress = tk.IntVar()
-strength_bar = ttk.Progressbar(app, variable=strength_progress, maximum=100, length=200)
-strength_bar.pack(pady=10)
-
-# Copy to Clipboard button
-copy_button = ttk.Button(app, text="Copy to Clipboard", command=copy_to_clipboard, style="TButton")
-copy_button.pack()
-
-app.mainloop()
+if __name__ == "__main__":
+    main()
